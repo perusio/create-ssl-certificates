@@ -1,0 +1,144 @@
+#!/bin/bash
+### generate_csr --- Generates a certificate signing request with new
+###                  private key using openssl.
+
+### Copyright (C) 2015 António P. P. Almeida <appa@perusio.net>
+
+### Author: António P. P. Almeida <appa@perusio.net>
+
+### Permission is hereby granted, free of charge, to any person obtaining a
+### copy of this software and associated documentation files (the "Software"),
+### to deal in the Software without restriction, including without limitation
+### the rights to use, copy, modify, merge, publish, distribute, sublicense,
+### and/or sell copies of the Software, and to permit persons to whom the
+### Software is furnished to do so, subject to the following conditions:
+
+### The above copyright notice and this permission notice shall be included in
+### all copies or substantial portions of the Software.
+
+### Except as contained in this notice, the name(s) of the above copyright
+### holders shall not be used in advertising or otherwise to promote the sale,
+### use or other dealings in this Software without prior written authorization.
+
+### THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+### IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+### FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+### THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+### LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+### FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+### DEALINGS IN THE SOFTWARE.
+SCRIPTNAME=${0##*/}
+
+## The certtool utility.
+OPENSSL=$(command -v openssl) || exit 0
+
+## Temporary template file name.
+TEMP_TEMPLATE=$(mktemp --suffix=.cfg)
+
+function print_usage() {
+    echo "Usage: $SCRIPTNAME -d <domain> -o <organization> -t <template> [-e <days>] [-v]"
+}
+
+## Check the number of arguments.
+if [ $# -lt 6 -o $# -gt 9 ]; then
+    print_usage
+    exit 1
+fi
+
+## Get the certificate expiration date in days.
+## $1: expiration in days or years.
+function get_expiration_date() {
+    ## Try to get the expiration in years.
+    local expiration_years = $(echo "$1" | grep '^[1-9]0*y' | \
+                                      sed 's/|(^[1-9]0\)*y/\1/')
+    local expiration_days
+
+    ## If there's no expiration in years try to get in days. Always a
+    ## multiple of 365.
+    if [ -z "$expiration_years" ]; then
+        if [ $1 -le 0 -o $(($1 % 365)) -neq 0 ]; then
+            echo "$SCRIPTNAME: The expiration in days must be a positive multiple of 365."
+            exit 4
+        fi
+        expiration_days = $1
+        ## Validate the expiration in years.
+    elif [ $expiration_years -gt 0 -a $expiration_years -lt 10 ]; then
+        expiration_days = $((expiration_years * 365))
+    else
+        echo "$SCRIPTNAME: The expiration in years has to be specified like: 2y (between 1 and 10 years).\n"
+        exit 5
+    fi
+    ## Return the expiration in days.
+    echo expiration_days
+}
+
+## Source the defaults.
+. $(dirname $0)/defaults.sh
+
+## Get the options.
+while getopts d:e:o:t:v OPT; do
+    case $OPT in
+        d|+d)
+            DOMAIN=$OPTARG
+            ;;
+        e|e+)
+            EXPIRATION=$(get_expiration_date "$OPTARG")
+            ;;
+        o|o+)
+            ORGANIZATION="$OPTARG"
+            ;;
+        t|+t)
+            TEMPLATE=$OPTARG
+            ;;
+        v|v+)
+            VERBOSE=1
+            ;;
+        *)
+            print_usage
+            exit 2
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+OPTIND=1
+
+## Check if the template file exist.
+if [ ! -f $TEMPLATE ]; then
+    print_usage
+    exit 3
+fi
+
+## Get the current template file.
+sed -e "s/<cert_serial>/$SERIAL/" -e "s/<dns_name>/$DOMAIN/" \
+    -e "s/<organization>/$ORGANIZATION/" $TEMPLATE > $TEMP_TEMPLATE
+
+## Check if it's a wildcard domain. If so replace '*' by 'wildcard'.
+NO_WILDCARD=$(echo $DOMAIN | cut -f 2 -d '*')
+if [ "$NO_WILDCARD" != "$DOMAIN" ]; then
+    DOMAIN="wildcard$NO_WILDCARD"
+fi
+
+## The CSR file name.
+CSR_FILENAME="${DOMAIN}_csr.pem"
+KEY_FILENAME="${DOMAIN}_key.pem"
+
+## Invoke certtool to generate the certificate signing request.
+if [ -z "$EXPIRATION" ]; then
+    $OPENSSL req -new -out $CSR_FILENAME -keyout $KEY_FILENAME \
+             -config $TEMP_TEMPLATE -newkey rsa:2048 -nodes
+else
+    $OPENSSL req -new -out $CSR_FILENAME -keyout $KEY_FILENAME \
+             -config $TEMP_TEMPLATE -days $EXPIRATION -newkey rsa:2048 -nodes
+fi
+
+## Print information on the CSR if the verbose argument is given.
+if [ -n "$VERBOSE" ]; then
+    $OPENSSL req -text -noout -verify -in $CSR_FILENAME
+fi
+
+function cleanup_temp() {
+    [ -f $TEMP_TEMPLATE ] && rm $TEMP_TEMPLATE
+}
+
+## Cleanup the temporary template file.
+trap cleanup_temp EXIT
