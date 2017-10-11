@@ -29,7 +29,7 @@
 ### DEALINGS IN THE SOFTWARE.
 SCRIPTNAME=${0##*/}
 
-## The certtool utility.
+## The openssl utility.
 OPENSSL=$(command -v openssl) || exit 0
 
 ## Temporary template file name.
@@ -50,7 +50,7 @@ fi
 function get_expiration_date() {
     ## Try to get the expiration in years.
     local expiration_years = $(echo "$1" | grep '^[1-9]0*y' | \
-                                      sed 's/|(^[1-9]0\)*y/\1/')
+                                   sed 's/\(^[1-9]0\)*y/\1/')
     local expiration_days
 
     ## If there's no expiration in years try to get in days. Always a
@@ -60,16 +60,16 @@ function get_expiration_date() {
             echo "$SCRIPTNAME: The expiration in days must be a positive multiple of 365."
             exit 4
         fi
-        expiration_days = $1
+        expiration_days=$1
         ## Validate the expiration in years.
-    elif [ $expiration_years -gt 0 -a $expiration_years -lt 10 ]; then
-        expiration_days = $((expiration_years * 365))
+    elif [ $expiration_years -gt 0 -a $expiration_years -lt 11 ]; then
+        expiration_days=$((expiration_years * 365))
     else
         echo "$SCRIPTNAME: The expiration in years has to be specified like: 2y (between 1 and 10 years).\n"
         exit 5
     fi
     ## Return the expiration in days.
-    echo expiration_days
+    echo $expiration_days
 }
 
 ## Source the defaults.
@@ -122,7 +122,9 @@ fi
 CSR_FILENAME="${DOMAIN}_csr.pem"
 KEY_FILENAME="${DOMAIN}_key.pem"
 
-## Invoke certtool to generate the certificate signing request.
+# openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365
+
+## Invoke openssl to generate the certificate signing request.
 if [ -z "$EXPIRATION" ]; then
     $OPENSSL req -new -out $CSR_FILENAME -keyout $KEY_FILENAME \
              -config $TEMP_TEMPLATE -newkey rsa:2048 -nodes
